@@ -1,0 +1,17 @@
+{
+  "name": "🌐 Sub-Agente: Email Manager",
+  "nodes": [
+    {"id":"trigger_email","name":"Execute Workflow Trigger","type":"n8n-nodes-base.executeWorkflowTrigger","typeVersion":1.1,"position":[100,300],"parameters":{}},
+    {"id":"llm_email","name":"OpenAI GPT-4o","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1.3,"position":[400,150],"onError":"continueRegularOutput","parameters":{"model":"gpt-4o","options":{"temperature":0.3}}},
+    {"id":"agent_email","name":"Email Manager Agent","type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3.1,"position":[400,300],"parameters":{"promptType":"define","text":"={{ $json.query }}","systemMessage":"Você é um especialista em gerenciamento de emails. Suas responsabilidades:\n- Ler, organizar e priorizar emails\n- Redigir respostas profissionais\n- Criar filtros e etiquetas\n- Identificar emails urgentes\n- Resumir caixas de entrada\n- Agendar envios\n\nSempre responda em português do Brasil de forma clara e objetiva. Ao redigir emails, siga boas práticas de comunicação profissional.","options":{"maxIterations":5}}},
+    {"id":"gmail_tool","name":"Gmail Tool","type":"n8n-nodes-base.gmailTool","typeVersion":2.2,"position":[650,150],"parameters":{"resource":"message","operation":"getAll","filters":{}}},
+    {"id":"format_output_email","name":"Format Email Response","type":"n8n-nodes-base.set","typeVersion":3.4,"position":[700,300],"parameters":{"assignments":{"assignments":[{"id":"out1","name":"response","value":"={{ $json.output }}","type":"string"},{"id":"out2","name":"agent","value":"Email Manager","type":"string"}]}}}
+  ],
+  "connections": {
+    "Execute Workflow Trigger":{"main":[[{"node":"Email Manager Agent","type":"main","index":0}]]},
+    "Email Manager Agent":{"main":[[{"node":"Format Email Response","type":"main","index":0}]]},
+    "OpenAI GPT-4o":{"ai_languageModel":[[{"node":"Email Manager Agent","type":"ai_languageModel","index":0}]]},
+    "Gmail Tool":{"ai_tool":[[{"node":"Email Manager Agent","type":"ai_tool","index":0}]]}
+  },
+  "settings":{"executionOrder":"v1","saveDataErrorExecution":"all","saveDataSuccessExecution":"all","saveManualExecutions":true,"callerPolicy":"workflowsFromSameOwner"}
+}

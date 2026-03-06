@@ -1,0 +1,17 @@
+{
+  "name": "📅 Sub-Agente: Calendar",
+  "nodes": [
+    {"id":"trigger_cal","name":"Execute Workflow Trigger","type":"n8n-nodes-base.executeWorkflowTrigger","typeVersion":1.1,"position":[100,300],"parameters":{}},
+    {"id":"llm_cal","name":"OpenAI GPT-4o","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1.3,"position":[400,100],"onError":"continueRegularOutput","parameters":{"model":"gpt-4o","options":{"temperature":0.2}}},
+    {"id":"agent_cal","name":"Calendar Agent","type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3.1,"position":[400,300],"parameters":{"promptType":"define","text":"={{ $json.query }}","systemMessage":"Você é um assistente especialista em gerenciamento de agenda e calendário. Suas responsabilidades:\n- Criar, editar e cancelar eventos no Google Calendar\n- Verificar disponibilidade e evitar conflitos de agenda\n- Agendar reuniões, compromissos e lembretes\n- Enviar convites e notificações aos participantes\n- Gerenciar recorrências e séries de eventos\n- Calcular fusos horários para reuniões internacionais\n- Sugerir melhores horários com base nos padrões do usuário\n- Preparar pautas e resumos pré-reunião\n\nUse o fuso horário America/Sao_Paulo por padrão. Responda sempre em português do Brasil.","options":{"maxIterations":6}}},
+    {"id":"gcal_tool","name":"Google Calendar Tool","type":"n8n-nodes-base.googleCalendarTool","typeVersion":1.3,"position":[650,150],"parameters":{"resource":"event","operation":"getAll","calendar":{"__rl":true,"mode":"list","value":"primary"},"options":{}}},
+    {"id":"format_output_cal","name":"Format Calendar Response","type":"n8n-nodes-base.set","typeVersion":3.4,"position":[700,300],"parameters":{"assignments":{"assignments":[{"id":"out1","name":"response","value":"={{ $json.output }}","type":"string"},{"id":"out2","name":"agent","value":"Calendar","type":"string"}]}}}
+  ],
+  "connections": {
+    "Execute Workflow Trigger":{"main":[[{"node":"Calendar Agent","type":"main","index":0}]]},
+    "Calendar Agent":{"main":[[{"node":"Format Calendar Response","type":"main","index":0}]]},
+    "OpenAI GPT-4o":{"ai_languageModel":[[{"node":"Calendar Agent","type":"ai_languageModel","index":0}]]},
+    "Google Calendar Tool":{"ai_tool":[[{"node":"Calendar Agent","type":"ai_tool","index":0}]]}
+  },
+  "settings":{"executionOrder":"v1","saveDataErrorExecution":"all","saveDataSuccessExecution":"all","saveManualExecutions":true,"callerPolicy":"workflowsFromSameOwner"}
+}

@@ -1,0 +1,19 @@
+{
+  "name": "🔍 Sub-Agente: Research",
+  "nodes": [
+    {"id":"trigger_research","name":"Execute Workflow Trigger","type":"n8n-nodes-base.executeWorkflowTrigger","typeVersion":1.1,"position":[100,300],"parameters":{}},
+    {"id":"llm_research","name":"OpenAI GPT-4o","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1.3,"position":[400,100],"onError":"continueRegularOutput","parameters":{"model":"gpt-4o","options":{"temperature":0.2}}},
+    {"id":"agent_research","name":"Research Agent","type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3.1,"position":[400,300],"parameters":{"promptType":"define","text":"={{ $json.query }}","systemMessage":"Você é um especialista em pesquisa e análise de informações. Suas responsabilidades:\n- Pesquisar tópicos profundamente em múltiplas fontes\n- Sintetizar informações complexas de forma clara\n- Verificar fatos e cruzar fontes\n- Identificar tendências e insights\n- Produzir sumários executivos\n- Citar fontes confiáveis\n\nSempre responda em português do Brasil. Seja preciso, científico e imparcial nas suas pesquisas.","options":{"maxIterations":8}}},
+    {"id":"search_tool","name":"Web Search Tool","type":"@n8n/n8n-nodes-langchain.toolHttpRequest","typeVersion":1.1,"position":[650,100],"onError":"continueRegularOutput","retryOnFail":true,"maxTries":3,"parameters":{"method":"GET","url":"https://serpapi.com/search","toolDescription":"Pesquisa na web usando SerpAPI. Use para encontrar informações atuais, notícias, artigos e dados sobre qualquer tópico.","sendQuery":true,"queryParameters":{"parameters":[{"name":"q","value":"{query}"},{"name":"api_key","value":"{serpapi_key}"},{"name":"hl","value":"pt-br"},{"name":"gl","value":"br"}]},"placeholderDefinitions":{"values":[{"name":"query","description":"A consulta de pesquisa em português ou inglês"},{"name":"serpapi_key","description":"Chave da API SerpAPI"}]}}},
+    {"id":"wiki_tool","name":"Wikipedia Tool","type":"@n8n/n8n-nodes-langchain.toolHttpRequest","typeVersion":1.1,"position":[650,250],"onError":"continueRegularOutput","retryOnFail":true,"maxTries":3,"parameters":{"method":"GET","url":"https://pt.wikipedia.org/api/rest_v1/page/summary/{title}","toolDescription":"Busca informações resumidas da Wikipedia em português sobre qualquer tópico ou pessoa.","placeholderDefinitions":{"values":[{"name":"title","description":"Título do artigo na Wikipedia (sem espaços, use underscores)"}]}}},
+    {"id":"format_output_research","name":"Format Research Response","type":"n8n-nodes-base.set","typeVersion":3.4,"position":[700,300],"parameters":{"assignments":{"assignments":[{"id":"out1","name":"response","value":"={{ $json.output }}","type":"string"},{"id":"out2","name":"agent","value":"Research","type":"string"}]}}}
+  ],
+  "connections": {
+    "Execute Workflow Trigger":{"main":[[{"node":"Research Agent","type":"main","index":0}]]},
+    "Research Agent":{"main":[[{"node":"Format Research Response","type":"main","index":0}]]},
+    "OpenAI GPT-4o":{"ai_languageModel":[[{"node":"Research Agent","type":"ai_languageModel","index":0}]]},
+    "Web Search Tool":{"ai_tool":[[{"node":"Research Agent","type":"ai_tool","index":0}]]},
+    "Wikipedia Tool":{"ai_tool":[[{"node":"Research Agent","type":"ai_tool","index":0}]]}
+  },
+  "settings":{"executionOrder":"v1","saveDataErrorExecution":"all","saveDataSuccessExecution":"all","saveManualExecutions":true,"callerPolicy":"workflowsFromSameOwner"}
+}

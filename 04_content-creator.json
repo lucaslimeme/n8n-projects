@@ -1,0 +1,15 @@
+{
+  "name": "✍️ Sub-Agente: Content Creator",
+  "nodes": [
+    {"id":"trigger_content","name":"Execute Workflow Trigger","type":"n8n-nodes-base.executeWorkflowTrigger","typeVersion":1.1,"position":[100,300],"parameters":{}},
+    {"id":"llm_content","name":"OpenAI GPT-4o","type":"@n8n/n8n-nodes-langchain.lmChatOpenAi","typeVersion":1.3,"position":[400,100],"onError":"continueRegularOutput","parameters":{"model":"gpt-4o","options":{"temperature":0.8}}},
+    {"id":"agent_content","name":"Content Creator Agent","type":"@n8n/n8n-nodes-langchain.agent","typeVersion":3.1,"position":[400,300],"parameters":{"promptType":"define","text":"={{ $json.query }}","systemMessage":"Você é um criador de conteúdo criativo e estratégico. Suas especialidades:\n- Posts para redes sociais (Instagram, LinkedIn, Twitter/X, TikTok)\n- Artigos de blog e longform content\n- Roteiros para vídeos e podcasts\n- E-mails de marketing e newsletters\n- Copy para landing pages e anúncios\n- Legendas, hashtags e CTAs otimizados\n- Conteúdo SEO-friendly\n- Adaptação de tom de voz por plataforma\n\nSempre crie conteúdo engajante, autenticado e adaptado ao público-alvo em português do Brasil. Use storytelling, dados e criatividade.","options":{"maxIterations":5}}},
+    {"id":"format_output_content","name":"Format Content Response","type":"n8n-nodes-base.set","typeVersion":3.4,"position":[700,300],"parameters":{"assignments":{"assignments":[{"id":"out1","name":"response","value":"={{ $json.output }}","type":"string"},{"id":"out2","name":"agent","value":"Content Creator","type":"string"}]}}}
+  ],
+  "connections": {
+    "Execute Workflow Trigger":{"main":[[{"node":"Content Creator Agent","type":"main","index":0}]]},
+    "Content Creator Agent":{"main":[[{"node":"Format Content Response","type":"main","index":0}]]},
+    "OpenAI GPT-4o":{"ai_languageModel":[[{"node":"Content Creator Agent","type":"ai_languageModel","index":0}]]}
+  },
+  "settings":{"executionOrder":"v1","saveDataErrorExecution":"all","saveDataSuccessExecution":"all","saveManualExecutions":true,"callerPolicy":"workflowsFromSameOwner"}
+}
