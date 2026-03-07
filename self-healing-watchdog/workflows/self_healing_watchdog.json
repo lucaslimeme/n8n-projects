@@ -1,0 +1,116 @@
+{
+  "name": "📡 Self-Healing Watchdog",
+  "nodes": [
+    {
+      "id": "schedule_trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [100, 400],
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      }
+    },
+    {
+      "id": "get_executions",
+      "name": "Get Recent Executions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [340, 400],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "GET",
+        "url": "http://localhost:5678/api/v1/executions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "status", "value": "error" },
+            { "name": "limit",  "value": "100" }
+          ]
+        },
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "filter_report",
+      "name": "Filter and Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [580, 400],
+      "parameters": {
+        "jsCode": "var ORCHESTRATOR_ID = 'NKSnUIomh70jdb7g';\nvar WATCHDOG_ID = 'FD0OCHSatdMzYc2I';\nvar cutoffMs = Date.now() - (60 * 60 * 1000);\n\nvar apiResponse = $input.first().json;\nvar allExecutions = (apiResponse && Array.isArray(apiResponse.data)) ? apiResponse.data : [];\n\nvar executions = [];\nallExecutions.forEach(function(e) {\n  var isIgnored = (e.workflowId === ORCHESTRATOR_ID || e.workflowId === WATCHDOG_ID);\n  var execMs = e.startedAt ? new Date(e.startedAt).getTime() : cutoffMs;\n  var isRecent = execMs >= cutoffMs;\n  if (!isIgnored && isRecent) {\n    executions.push(e);\n  }\n});\n\nvar grouped = {};\nexecutions.forEach(function(exec) {\n  var wfId = exec.workflowId || 'unknown';\n  var wfName = (exec.workflowData && exec.workflowData.name) ? exec.workflowData.name : wfId;\n  if (!grouped[wfId]) {\n    grouped[wfId] = { name: wfName, count: 0, lastTime: '' };\n  }\n  grouped[wfId].count = grouped[wfId].count + 1;\n  if (!grouped[wfId].lastTime || exec.startedAt > grouped[wfId].lastTime) {\n    grouped[wfId].lastTime = exec.startedAt;\n  }\n});\n\nvar lines = [];\nObject.values(grouped).forEach(function(w) {\n  var lastTime = w.lastTime ? new Date(w.lastTime).toLocaleString('pt-BR') : 'desconhecido';\n  lines.push('ERRO: ' + w.name + ' - ' + w.count + ' vez(es) | Ultimo: ' + lastTime);\n});\n\nvar total = executions.length;\nvar unique = Object.keys(grouped).length;\nvar now = new Date().toLocaleString('pt-BR');\nvar reportText = '';\n\nif (total > 0) {\n  reportText = 'WATCHDOG REPORT - ' + now + '\\n\\n' + total + ' erro(s) na ultima hora em ' + unique + ' workflow(s):\\n\\n' + lines.join('\\n') + '\\n\\nSelf-Healing Orchestrator acionado automaticamente.';\n} else {\n  reportText = 'WATCHDOG OK - ' + now + ' - Sem erros na ultima hora.';\n}\n\nreturn [{\n  json: {\n    hasErrors: total > 0,\n    reportText: reportText,\n    total: total,\n    unique: unique\n  }\n}];"
+      }
+    },
+    {
+      "id": "has_errors",
+      "name": "Has Errors?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [820, 400],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2, "leftValue": "", "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "he1",
+              "leftValue": "={{ $json.total }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "send_report",
+      "name": "Send Error Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1060, 280],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.reportText }}",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "all_ok",
+      "name": "All Systems OK",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1060, 560],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Schedule Trigger":        { "main": [[{ "node": "Get Recent Executions",    "type": "main", "index": 0 }]] },
+    "Get Recent Executions":   { "main": [[{ "node": "Filter and Build Report",  "type": "main", "index": 0 }]] },
+    "Filter and Build Report": { "main": [[{ "node": "Has Errors?",              "type": "main", "index": 0 }]] },
+    "Has Errors?": {
+      "main": [
+        [{ "node": "Send Error Report", "type": "main", "index": 0 }],
+        [{ "node": "All Systems OK",    "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  }
+}
