@@ -1,0 +1,295 @@
+{
+  "name": "🔧 Self-Healing Orchestrator",
+  "nodes": [
+    {
+      "id": "error_trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [100, 400],
+      "parameters": {}
+    },
+    {
+      "id": "extract_context",
+      "name": "Extract Error Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [320, 400],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "ec1", "name": "workflowId",       "value": "={{ $json.workflow.id }}",                                        "type": "string" },
+            { "id": "ec2", "name": "workflowName",     "value": "={{ $json.workflow.name }}",                                      "type": "string" },
+            { "id": "ec3", "name": "executionId",      "value": "={{ $json.execution.id }}",                                       "type": "string" },
+            { "id": "ec4", "name": "errorMessage",     "value": "={{ $json.error.message }}",                                      "type": "string" },
+            { "id": "ec5", "name": "errorNodeName",    "value": "={{ $json.error.node ? $json.error.node.name : 'unknown' }}",     "type": "string" },
+            { "id": "ec6", "name": "errorTimestamp",   "value": "={{ $now.toISO() }}",                                             "type": "string" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "self_loop_check",
+      "name": "Is Self-Healing Loop?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [540, 400],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2, "leftValue": "", "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "sl1",
+              "leftValue": "={{ $json.workflowId }}",
+              "rightValue": "NKSnUIomh70jdb7g",
+              "operator": { "type": "string", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "skip_self_loop",
+      "name": "Skip - Self Loop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [540, 600],
+      "parameters": {}
+    },
+    {
+      "id": "get_workflow",
+      "name": "Get Failed Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [760, 400],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "GET",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $json.workflowId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }]
+        },
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "is_workflow_valid",
+      "name": "Is Workflow Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [980, 400],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2, "leftValue": "", "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "wv1",
+              "leftValue": "={{ $json.nodes ? 'yes' : 'no' }}",
+              "rightValue": "yes",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "prepare_claude",
+      "name": "Prepare Claude Prompt",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1200, 280],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "pc2", "name": "workflowId",      "value": "={{ $('Extract Error Context').item.json.workflowId }}",      "type": "string" },
+            { "id": "pc3", "name": "workflowName",    "value": "={{ $('Extract Error Context').item.json.workflowName }}",    "type": "string" },
+            { "id": "pc4", "name": "errorMessage",    "value": "={{ $('Extract Error Context').item.json.errorMessage }}",    "type": "string" },
+            { "id": "pc5", "name": "errorNodeName",   "value": "={{ $('Extract Error Context').item.json.errorNodeName }}",   "type": "string" },
+            { "id": "pc6", "name": "errorTimestamp",  "value": "={{ $('Extract Error Context').item.json.errorTimestamp }}",  "type": "string" },
+            {
+              "id": "pc7",
+              "name": "claudePrompt",
+              "value": "=Voce e um especialista em n8n. Um workflow falhou e precisa ser corrigido.\n\n## ERRO\nWorkflow: {{ $('Extract Error Context').item.json.workflowName }}\nNo com falha: {{ $('Extract Error Context').item.json.errorNodeName }}\nMensagem: {{ $('Extract Error Context').item.json.errorMessage }}\nTimestamp: {{ $('Extract Error Context').item.json.errorTimestamp }}\n\n## WORKFLOW JSON ATUAL\n{{ JSON.stringify($('Get Failed Workflow').item.json) }}\n\n## SUA TAREFA\n1. Analise o erro\n2. Identifique a causa raiz\n3. Corrija o problema no JSON\n4. Retorne APENAS o JSON corrigido\n\nIMPORTANTE:\n- Retorne SOMENTE o JSON, sem markdown, sem blocos de codigo\n- O JSON DEVE conter obrigatoriamente os campos: name, nodes, connections\n- Se nao conseguir corrigir, retorne o JSON original com a propriedade healingNote na raiz descrevendo o problema",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "claude_analyze",
+      "name": "Claude Analyzes and Fixes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [1420, 280],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key",           "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version",   "value": "2023-06-01" },
+            { "name": "content-type",        "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 8096, messages: [{ role: 'user', content: $json.claudePrompt }] }) }}",
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "parse_fix",
+      "name": "Parse Claude Fix",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1640, 280],
+      "parameters": {
+        "jsCode": "var parseSuccess = false;\nvar healingNote = 'Nao foi possivel processar a resposta do Claude';\nvar fixedWorkflow = {};\nvar rawText = '';\n\nvar response = $input.first().json;\nvar prepNode = $('Prepare Claude Prompt').first().json;\n\nvar hasValidResponse = (\n  response &&\n  response.content &&\n  Array.isArray(response.content) &&\n  response.content.length > 0 &&\n  response.content[0].text\n);\n\nif (!hasValidResponse) {\n  healingNote = 'Claude API retornou resposta invalida. Verifique a chave ANTHROPIC_API_KEY.';\n} else {\n  rawText = response.content[0].text.trim();\n\n  if (rawText.length === 0) {\n    healingNote = 'Claude retornou texto em branco.';\n  } else {\n    var parsed = null;\n    var parseError = '';\n    try {\n      parsed = JSON.parse(rawText);\n    } catch(e1) {\n      parseError = e1.message;\n      var match = rawText.match(/\\{[\\s\\S]*\\}/);\n      if (match) {\n        try { parsed = JSON.parse(match[0]); } catch(e2) { parseError = e2.message; }\n      }\n    }\n\n    if (parsed !== null && parsed !== undefined && typeof parsed === 'object' && !Array.isArray(parsed)) {\n      fixedWorkflow = parsed;\n\n      if (fixedWorkflow.healingNote) {\n        healingNote = String(fixedWorkflow.healingNote);\n        delete fixedWorkflow.healingNote;\n      }\n\n      var hasNodes = fixedWorkflow.nodes && Array.isArray(fixedWorkflow.nodes);\n      var hasConnections = fixedWorkflow.connections && typeof fixedWorkflow.connections === 'object';\n\n      if (!hasNodes || !hasConnections) {\n        var missing = [];\n        if (!hasNodes) missing.push('nodes');\n        if (!hasConnections) missing.push('connections');\n        if (!healingNote || healingNote === 'Nao foi possivel processar a resposta do Claude') {\n          healingNote = 'JSON sem campos obrigatorios: ' + missing.join(', ');\n        }\n        fixedWorkflow = {};\n      } else {\n        parseSuccess = true;\n        if (!healingNote || healingNote === 'Nao foi possivel processar a resposta do Claude') {\n          healingNote = 'Fix gerado com sucesso pelo Claude';\n        }\n        if (!fixedWorkflow.name) {\n          fixedWorkflow.name = prepNode.workflowName || 'Recovered Workflow';\n        }\n      }\n    } else {\n      healingNote = 'Claude nao retornou um objeto JSON valido. Erro: ' + parseError;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    fixedWorkflow: fixedWorkflow,\n    parseSuccess: parseSuccess,\n    healingNote: healingNote,\n    workflowId: prepNode.workflowId || '',\n    workflowName: prepNode.workflowName || '',\n    errorMessage: prepNode.errorMessage || '',\n    errorNodeName: prepNode.errorNodeName || '',\n    timestamp: prepNode.errorTimestamp || new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "check_fix",
+      "name": "Fix Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [1860, 280],
+      "onError": "continueErrorOutput",
+      "parameters": {
+        "conditions": {
+          "options": { "version": 2, "leftValue": "", "caseSensitive": false, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cf1",
+              "leftValue": "={{ $json.parseSuccess }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "deploy_fix",
+      "name": "Deploy Fixed Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [2080, 160],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $json.workflowId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" },
+            { "name": "Content-Type",  "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.fixedWorkflow) }}",
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "reactivate",
+      "name": "Reactivate Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [2300, 160],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $('Parse Claude Fix').first().json.workflowId }}/activate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }]
+        },
+        "options": { "response": { "response": { "responseFormat": "json" } } }
+      }
+    },
+    {
+      "id": "notify_success",
+      "name": "Notify Fix Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2520, 160],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=SELF-HEALING CONCLUIDO\n\nWorkflow: {{ $('Parse Claude Fix').first().json.workflowName }}\nErro original: {{ $('Parse Claude Fix').first().json.errorMessage }}\nNo com falha: {{ $('Parse Claude Fix').first().json.errorNodeName }}\nAnalise do Claude: {{ $('Parse Claude Fix').first().json.healingNote }}\nHorario: {{ $('Parse Claude Fix').first().json.timestamp }}\n\nWorkflow corrigido e reativado automaticamente.",
+        "additionalFields": {}
+      }
+    },
+    {
+      "id": "notify_fail",
+      "name": "Notify Manual Fix Needed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2080, 560],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=INTERVENCAO MANUAL NECESSARIA\n\nWorkflow: {{ $json.workflowName || $('Extract Error Context').item.json.workflowName }}\nErro: {{ $json.errorMessage || $('Extract Error Context').item.json.errorMessage }}\nNo: {{ $json.errorNodeName || $('Extract Error Context').item.json.errorNodeName }}\nHorario: {{ $json.timestamp || $('Extract Error Context').item.json.errorTimestamp }}\n\nAnalise: {{ $json.healingNote || 'Workflow nao encontrado ou inacessivel via API do n8n.' }}",
+        "additionalFields": {}
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": { "main": [[{ "node": "Extract Error Context", "type": "main", "index": 0 }]] },
+    "Extract Error Context": { "main": [[{ "node": "Is Self-Healing Loop?", "type": "main", "index": 0 }]] },
+    "Is Self-Healing Loop?": {
+      "main": [
+        [{ "node": "Get Failed Workflow", "type": "main", "index": 0 }],
+        [{ "node": "Skip - Self Loop",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Failed Workflow": { "main": [[{ "node": "Is Workflow Valid?", "type": "main", "index": 0 }]] },
+    "Is Workflow Valid?": {
+      "main": [
+        [{ "node": "Prepare Claude Prompt",     "type": "main", "index": 0 }],
+        [{ "node": "Notify Manual Fix Needed",  "type": "main", "index": 0 }]
+      ]
+    },
+    "Prepare Claude Prompt":    { "main": [[{ "node": "Claude Analyzes and Fixes", "type": "main", "index": 0 }]] },
+    "Claude Analyzes and Fixes": { "main": [[{ "node": "Parse Claude Fix",          "type": "main", "index": 0 }]] },
+    "Parse Claude Fix":          { "main": [[{ "node": "Fix Valid?",                "type": "main", "index": 0 }]] },
+    "Fix Valid?": {
+      "main": [
+        [{ "node": "Deploy Fixed Workflow",    "type": "main", "index": 0 }],
+        [{ "node": "Notify Manual Fix Needed", "type": "main", "index": 0 }]
+      ]
+    },
+    "Deploy Fixed Workflow": { "main": [[{ "node": "Reactivate Workflow", "type": "main", "index": 0 }]] },
+    "Reactivate Workflow":   { "main": [[{ "node": "Notify Fix Success",  "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  }
+}
