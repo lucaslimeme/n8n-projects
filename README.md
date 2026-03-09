@@ -19,12 +19,11 @@
 
 ---
 ## Projetos
-
 | | Projeto | Descrição | Stack |
 |---|---|---|---|
 | 🤖 | [ARIA — AI Agent Swarm](./aria-agent-swarm/) | Sistema multi-agente com WhatsApp, voz e 5 especialistas de IA | n8n · GPT-4o · ElevenLabs · PostgreSQL |
 | 🔧 | [Self-Healing Watchdog](./self-healing-watchdog/) | Sistema de autocorreção: monitora workflows, chama o Claude pra diagnosticar falhas e faz deploy automático do fix | n8n · Claude Sonnet · Telegram · n8n API |
-
+| 💳 | [AI SDR Brasileiro Autônomo](./n8n-ai-sdr-brasileiro/) | SDR de IA que qualifica leads pelo WhatsApp, gera proposta com PIX automático e fecha vendas B2B | n8n · GPT-4o · Evolution API · Efí Bank · LGPD |
 > Mais projetos chegando em breve.
 
 ---
