@@ -1,0 +1,511 @@
+{
+  "name": "💳 AI SDR BR - Parte 2: Proposta + PIX",
+  "nodes": [
+    {
+      "id": "w2n01",
+      "name": "Webhook Proposta PIX",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sdr-proposta-pix",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w2n02",
+      "name": "Validar Dados Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "jsCode": "var d = $input.first().json;\nvar phone = d.phone ? String(d.phone) : '';\nvar name = d.name ? String(d.name) : '';\nvar company = d.company ? String(d.company) : '';\nvar product = d.productInterest ? String(d.productInterest) : '';\nvar budget = d.budget ? String(d.budget) : '';\nvar instance = d.instance ? String(d.instance) : '';\nvar cnpj = d.cnpj ? String(d.cnpj) : '';\nvar valid = phone !== '' && name !== '' && company !== '' && product !== '';\nvar cleaned = budget.replace(/[^0-9.,]/g, '').replace(',', '.');\nvar budgetNum = parseFloat(cleaned) || 100.00;\nvar budgetStr = budgetNum.toFixed(2);\nvar out = {};\nout.valid = valid;\nout.phone = phone;\nout.instance = instance;\nout.name = name;\nout.company = company;\nout.cnpj = cnpj;\nout.product = product;\nout.budget = budget;\nout.budgetNum = budgetNum;\nout.budgetStr = budgetStr;\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "w2n03",
+      "name": "Dados Validos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c01",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "w2n04",
+      "name": "Dados Insuficientes",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        480,
+        520
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "w2nx",
+      "name": "Montar Credencial Efi",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "jsCode": "var clientId = $env.EFI_CLIENT_ID || '';\nvar clientSecret = $env.EFI_CLIENT_SECRET || '';\nvar raw = clientId + ':' + clientSecret;\nvar encoded = Buffer.from(raw).toString('base64');\nvar lead = $('Validar Dados Lead').first().json;\nreturn [{ json: { basicAuth: 'Basic ' + encoded, phone: lead.phone, instance: lead.instance, name: lead.name, company: lead.company, cnpj: lead.cnpj, product: lead.product, budgetStr: lead.budgetStr } }];"
+      }
+    },
+    {
+      "id": "w2n05",
+      "name": "Obter Token Efi",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EFI_BASE_URL + '/oauth/token' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $('Montar Credencial Efi').first().json.basicAuth }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-www-form-urlencoded"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/x-www-form-urlencoded",
+        "body": "grant_type=client_credentials",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w2n06",
+      "name": "Criar Cobranca PIX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1200,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EFI_BASE_URL + '/v2/cob' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Obter Token Efi').first().json.access_token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ calendario: { expiracao: 86400 }, valor: { original: $('Montar Credencial Efi').first().json.budgetStr }, chave: $env.EFI_PIX_KEY, solicitacaoPagador: 'Pagamento: ' + $('Montar Credencial Efi').first().json.product, infoAdicionais: [{ nome: 'Empresa', valor: $('Montar Credencial Efi').first().json.company }, { nome: 'Produto', valor: $('Montar Credencial Efi').first().json.product }] }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000
+    },
+    {
+      "id": "w2n07",
+      "name": "Buscar QR Code PIX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        300
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.EFI_BASE_URL + '/v2/loc/' + $('Criar Cobranca PIX').first().json.loc.id + '/qrcode' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $('Obter Token Efi').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w2n08",
+      "name": "Montar Proposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        300
+      ],
+      "parameters": {
+        "jsCode": "var lead = $('Validar Dados Lead').first().json;\nvar pixResp = $('Criar Cobranca PIX').first().json;\nvar qrResp = $('Buscar QR Code PIX').first().json;\nvar txid = pixResp.txid || '';\nvar copiaCola = qrResp.qrcode || '';\nvar imagem = qrResp.imagemQrcode || '';\nvar proposta = 'Oi ' + lead.name + '! Sua proposta esta pronta!\\n\\n';\nproposta = proposta + 'Empresa: ' + lead.company + '\\n';\nproposta = proposta + 'Produto: ' + lead.product + '\\n';\nproposta = proposta + 'Valor: R$ ' + lead.budgetStr + '\\n\\n';\nproposta = proposta + 'Estou enviando o QR Code PIX abaixo.\\n';\nproposta = proposta + 'Vencimento: 24 horas.\\n\\n';\nproposta = proposta + 'Qualquer duvida e so chamar!';\nvar out = {};\nout.phone = lead.phone;\nout.instance = lead.instance;\nout.name = lead.name;\nout.company = lead.company;\nout.product = lead.product;\nout.budgetStr = lead.budgetStr;\nout.txid = txid;\nout.copiaCola = copiaCola;\nout.imagem = imagem;\nout.proposta = proposta;\nout.Phone = lead.phone;\nout.Stage = 'AGUARDANDO_PAGAMENTO';\nout.PIX_TxID = txid;\nout.PIX_CopiaCola = copiaCola;\nout.UpdatedAt = new Date().toISOString();\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "w2n09",
+      "name": "Salvar PIX no CRM",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1920,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {
+          "handlingExtraData": "insertInNewColumn"
+        }
+      }
+    },
+    {
+      "id": "w2n10",
+      "name": "Enviar Proposta WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2160,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $('Montar Proposta').first().json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.EVOLUTION_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ number: $('Montar Proposta').first().json.phone, text: $('Montar Proposta').first().json.proposta }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "w2n11",
+      "name": "Enviar QR Code WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2400,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendMedia/' + $('Montar Proposta').first().json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.EVOLUTION_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ number: $('Montar Proposta').first().json.phone, mediatype: 'image', mimetype: 'image/png', media: $('Montar Proposta').first().json.imagem, fileName: 'qrcode-pix.png', caption: 'QR Code PIX\\n\\nCopia e cola:\\n' + $('Montar Proposta').first().json.copiaCola }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "w2n12",
+      "name": "Telegram Nova Proposta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2640,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: 'Nova proposta enviada!\\n\\nLead: ' + $('Montar Proposta').first().json.name + '\\nEmpresa: ' + $('Montar Proposta').first().json.company + '\\nProduto: ' + $('Montar Proposta').first().json.product + '\\nValor: R$ ' + $('Montar Proposta').first().json.budgetStr + '\\nTxID: ' + $('Montar Proposta').first().json.txid, parse_mode: 'HTML' }) }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Proposta PIX": {
+      "main": [
+        [
+          {
+            "node": "Validar Dados Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Dados Lead": {
+      "main": [
+        [
+          {
+            "node": "Dados Validos?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dados Validos?": {
+      "main": [
+        [
+          {
+            "node": "Montar Credencial Efi",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Dados Insuficientes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Credencial Efi": {
+      "main": [
+        [
+          {
+            "node": "Obter Token Efi",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obter Token Efi": {
+      "main": [
+        [
+          {
+            "node": "Criar Cobranca PIX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Criar Cobranca PIX": {
+      "main": [
+        [
+          {
+            "node": "Buscar QR Code PIX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar QR Code PIX": {
+      "main": [
+        [
+          {
+            "node": "Montar Proposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar Proposta": {
+      "main": [
+        [
+          {
+            "node": "Salvar PIX no CRM",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salvar PIX no CRM": {
+      "main": [
+        [
+          {
+            "node": "Enviar Proposta WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Proposta WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Enviar QR Code WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar QR Code WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Telegram Nova Proposta",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}

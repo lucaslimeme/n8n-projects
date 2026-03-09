@@ -1,0 +1,372 @@
+{
+  "name": "🟢 AI SDR BR - Parte 3: Callback PIX",
+  "nodes": [
+    {
+      "id": "w3n01",
+      "name": "Webhook PIX Callback",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "pix-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "w3n02",
+      "name": "Validar Payload PIX",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "jsCode": "var body = $input.first().json;\nvar valid = false;\nvar txid = '';\nvar valor = '';\nvar pagadorNome = '';\nvar pagadorCpf = '';\nvar horario = '';\nvar pixArr = body.pix;\nif (pixArr && Array.isArray(pixArr) && pixArr.length > 0) {\n  var p = pixArr[0];\n  txid = p.txid || '';\n  valor = p.valor || '';\n  horario = p.horario || '';\n  if (p.pagador) {\n    pagadorNome = p.pagador.nome || '';\n    pagadorCpf = p.pagador.cpf || '';\n  }\n  valid = txid !== '' && valor !== '';\n}\nvar out = {};\nout.valid = valid;\nout.txid = txid;\nout.valor = valor;\nout.pagadorNome = pagadorNome;\nout.pagadorCpf = pagadorCpf;\nout.horario = horario;\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "w3n03",
+      "name": "Pagamento Valido?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c01",
+              "leftValue": "={{ $json.valid }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "w3n04",
+      "name": "Responder 400",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        480,
+        520
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"error\", \"message\": \"Invalid PIX payload\"}",
+        "options": {
+          "responseCode": 400
+        }
+      }
+    },
+    {
+      "id": "w3n05",
+      "name": "Buscar Lead por TxID",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        720,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "PIX_TxID",
+              "lookupValue": "={{ $('Validar Payload PIX').first().json.txid }}"
+            }
+          ]
+        },
+        "options": {
+          "returnFirstMatch": true,
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "specifyRangeA1",
+              "range": "A:Z"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "w3n06",
+      "name": "Preparar Dados PAGO",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        300
+      ],
+      "parameters": {
+        "jsCode": "var pagamento = $('Validar Payload PIX').first().json;\nvar leadRows = $('Buscar Lead por TxID').all();\nvar phone = '';\nvar instance = $env.EVOLUTION_INSTANCE || '';\nvar name = '';\nvar company = '';\nvar product = '';\nif (leadRows.length > 0 && leadRows[0].json) {\n  var lead = leadRows[0].json;\n  phone = lead.Phone || '';\n  name = lead.Name || '';\n  company = lead.Company || '';\n  product = lead.ProductInterest || '';\n}\nvar confirmMsg = 'Pagamento confirmado, ' + name + '!\\n\\n';\nconfirmMsg = confirmMsg + 'Valor pago: R$ ' + pagamento.valor + '\\n';\nconfirmMsg = confirmMsg + 'Empresa: ' + company + '\\n';\nconfirmMsg = confirmMsg + 'Produto: ' + product + '\\n\\n';\nconfirmMsg = confirmMsg + 'Nossa equipe entrara em contato em breve. Bem-vindo(a)!';\nvar out = {};\nout.Phone = phone;\nout.Stage = 'PAGO';\nout.UpdatedAt = new Date().toISOString();\nout._phone = phone;\nout._instance = instance;\nout._name = name;\nout._confirmMsg = confirmMsg;\nout._valor = pagamento.valor;\nout._txid = pagamento.txid;\nout._company = company;\nout._product = product;\nreturn [{ json: out }];"
+      }
+    },
+    {
+      "id": "w3n07",
+      "name": "Atualizar Lead PAGO",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1200,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "={{ $env.GOOGLE_SHEET_ID }}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [
+            "Phone"
+          ],
+          "schema": []
+        },
+        "options": {
+          "handlingExtraData": "ignoreIt"
+        }
+      }
+    },
+    {
+      "id": "w3n08",
+      "name": "Enviar Confirmacao WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1440,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.EVOLUTION_API_URL + '/message/sendText/' + $('Preparar Dados PAGO').first().json._instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.EVOLUTION_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ number: $('Preparar Dados PAGO').first().json._phone, text: $('Preparar Dados PAGO').first().json._confirmMsg }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000
+    },
+    {
+      "id": "w3n09",
+      "name": "Telegram Venda Fechada",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1680,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.telegram.org/bot' + $env.TELEGRAM_BOT_TOKEN + '/sendMessage' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: 'Venda FECHADA!\\n\\nLead: ' + $('Preparar Dados PAGO').first().json._name + '\\nEmpresa: ' + $('Preparar Dados PAGO').first().json._company + '\\nProduto: ' + $('Preparar Dados PAGO').first().json._product + '\\nValor: R$ ' + $('Preparar Dados PAGO').first().json._valor + '\\nTxID: ' + $('Preparar Dados PAGO').first().json._txid, parse_mode: 'HTML' }) }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "w3n10",
+      "name": "Responder 200 OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1920,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"status\": \"ok\"}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook PIX Callback": {
+      "main": [
+        [
+          {
+            "node": "Validar Payload PIX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar Payload PIX": {
+      "main": [
+        [
+          {
+            "node": "Pagamento Valido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pagamento Valido?": {
+      "main": [
+        [
+          {
+            "node": "Buscar Lead por TxID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Responder 400",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Buscar Lead por TxID": {
+      "main": [
+        [
+          {
+            "node": "Preparar Dados PAGO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar Dados PAGO": {
+      "main": [
+        [
+          {
+            "node": "Atualizar Lead PAGO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Atualizar Lead PAGO": {
+      "main": [
+        [
+          {
+            "node": "Enviar Confirmacao WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar Confirmacao WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Telegram Venda Fechada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Venda Fechada": {
+      "main": [
+        [
+          {
+            "node": "Responder 200 OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  }
+}
