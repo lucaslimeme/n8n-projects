@@ -1,8 +1,3 @@
-<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/e5e9f9a9-4be9-4279-b2ae-35ec7599921f" />
-
-
-
-
 <div align="center">
 
 <h1>Meta-Workflow de Autocura</h1>
