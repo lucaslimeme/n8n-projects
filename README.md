@@ -8,7 +8,7 @@
 
 <img src="https://img.shields.io/badge/n8n-workflows-orange?style=for-the-badge&logo=n8n" />
 <img src="https://img.shields.io/badge/GPT--4o-powered-412991?style=for-the-badge&logo=openai" />
-<img src="https://img.shields.io/badge/projetos-1-blue?style=for-the-badge" />
+<img src="https://img.shields.io/badge/projetos-3-blue?style=for-the-badge" />
 <img src="https://img.shields.io/badge/status-ativo-brightgreen?style=for-the-badge" />
 
 <br><br>
