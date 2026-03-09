@@ -1,6 +1,3 @@
-<img width="964" height="625" alt="image" src="https://github.com/user-attachments/assets/8909a901-6fb0-422f-8517-27293b926a0b" />
-
-
 <div align="center">
 
 <h1>ARIA — Sistema de Multi-Agentes de IA para WhatsApp</h1>
