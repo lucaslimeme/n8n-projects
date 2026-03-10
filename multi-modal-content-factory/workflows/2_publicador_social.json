@@ -1,0 +1,189 @@
+{
+  "name": "📅 Content Factory — Publicador Social",
+  "active": false,
+  "meta": {
+    "author": "Lucas Pontes Imeme",
+    "version": "1.0.0",
+    "description": "Sub-workflow do Content Factory. Publica em paralelo no LinkedIn (UGC API v2) e Instagram (Meta Graph API v18). Usa Merge node para garantir sincronização antes de coletar os IDs e atualizar o Google Sheets.",
+    "setup": {
+      "variables_required": [
+        "LINKEDIN_ACCESS_TOKEN — OAuth token com permissão w_member_social",
+        "LINKEDIN_ORG_ID — ID numérico da sua página de empresa no LinkedIn",
+        "INSTAGRAM_USER_ID — ID do usuário na Meta Graph API",
+        "INSTAGRAM_ACCESS_TOKEN — Token de acesso Meta Graph API",
+        "CONTENT_FACTORY_SHEET_ID — ID da planilha Google Sheets (da URL)"
+      ],
+      "credentials_required": [
+        "Google Sheets OAuth2"
+      ],
+      "activation": "NÃO ativar este workflow. Ele é chamado automaticamente pelo Pipeline Principal via 'Execute Sub-Workflow'."
+    }
+  },
+  "nodes": [
+    {
+      "id": "pub-1",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [200, 300],
+      "parameters": {}
+    },
+    {
+      "id": "pub-2",
+      "name": "Code — Parse Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 300],
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet d;\ntry {\n  d = typeof item.post_data === 'string' ? JSON.parse(item.post_data) : item;\n} catch(e) {\n  d = item;\n}\nif (!d.linkedin_post) d.linkedin_post = { text: '', hashtags: [] };\nif (!d.instagram_post) d.instagram_post = { caption: '', stories: [], hashtags: [] };\nif (!d.session_id) d.session_id = 'cf_' + Date.now();\nreturn [{ json: d }];"
+      }
+    },
+    {
+      "id": "pub-3",
+      "name": "HTTP — LinkedIn Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [640, 160],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/ugcPosts",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{$vars.LINKEDIN_ACCESS_TOKEN}}" },
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Restli-Protocol-Version", "value": "2.0.0" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"author\":\"urn:li:organization:{{$vars.LINKEDIN_ORG_ID}}\",\"lifecycleState\":\"PUBLISHED\",\"specificContent\":{\"com.linkedin.ugc.ShareContent\":{\"shareCommentary\":{\"text\":\"{{$json.linkedin_post.text}}\"},\"shareMediaCategory\":\"NONE\"}},\"visibility\":{\"com.linkedin.ugc.MemberNetworkVisibility\":\"PUBLIC\"}}",
+        "options": { "ignoreResponseCode": true }
+      }
+    },
+    {
+      "id": "pub-4",
+      "name": "HTTP — Instagram Criar Container",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [640, 440],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/{{$vars.INSTAGRAM_USER_ID}}/media",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "image_url",    "value": "={{$json.image_url || 'https://placehold.co/1080x1080/1a1a2e/white?text=Post'}}" },
+            { "name": "caption",      "value": "={{$json.instagram_post.caption}}" },
+            { "name": "access_token", "value": "={{$vars.INSTAGRAM_ACCESS_TOKEN}}" }
+          ]
+        },
+        "options": { "ignoreResponseCode": true }
+      }
+    },
+    {
+      "id": "pub-5",
+      "name": "HTTP — Instagram Publicar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [860, 440],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/{{$vars.INSTAGRAM_USER_ID}}/media_publish",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "creation_id",  "value": "={{$json.id}}" },
+            { "name": "access_token", "value": "={{$vars.INSTAGRAM_ACCESS_TOKEN}}" }
+          ]
+        },
+        "options": { "ignoreResponseCode": true }
+      }
+    },
+    {
+      "id": "pub-merge",
+      "name": "Merge — Aguardar LinkedIn e Instagram",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [1080, 300],
+      "parameters": { "mode": "append", "numberInputs": 2 }
+    },
+    {
+      "id": "pub-6",
+      "name": "Code — Coletar IDs Publicação",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 300],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "let od = {}, lr = {}, ir = {};\ntry { od = $('Code — Parse Input').first().json; } catch(e) { od = {}; }\ntry { lr = $('HTTP — LinkedIn Post').first().json; } catch(e) { lr = { _error: e.message }; }\ntry { ir = $('HTTP — Instagram Publicar').first().json; } catch(e) { ir = { _error: e.message }; }\nconst liId = lr.id || lr.value?.id || (lr.error ? 'linkedin_error: ' + lr.error.message : null) || 'linkedin_no_response';\nconst igId = ir.id || (ir.error ? 'instagram_error: ' + ir.error.message : null) || 'instagram_no_response';\nconst liOk = !!lr.id && !lr.error;\nconst igOk = !!ir.id && !ir.error;\nconsole.log('[Publicador] LinkedIn:', liOk ? 'OK' : 'ERRO', liId);\nconsole.log('[Publicador] Instagram:', igOk ? 'OK' : 'ERRO', igId);\nreturn [{ json: { session_id: od.session_id || 'unknown', topic: od.topic || '', linkedin_post_id: String(liId), instagram_post_id: String(igId), published_at: new Date().toISOString(), linkedin_success: liOk, instagram_success: igOk, status: 'published' } }];"
+      }
+    },
+    {
+      "id": "pub-7",
+      "name": "Google Sheets — Atualizar Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [1520, 300],
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "={{$vars.CONTENT_FACTORY_SHEET_ID}}", "mode": "id" },
+        "sheetName":  { "__rl": true, "value": "Posts", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id":        "={{$json.session_id}}",
+            "linkedin_post_id":  "={{$json.linkedin_post_id}}",
+            "instagram_post_id": "={{$json.instagram_post_id}}",
+            "status":            "published",
+            "published_at":      "={{$json.published_at}}",
+            "linkedin_success":  "={{$json.linkedin_success}}",
+            "instagram_success": "={{$json.instagram_success}}"
+          },
+          "matchingColumns": ["session_id"]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "pub-8",
+      "name": "Set — Resultado Final",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1740, 300],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "success",          "value": true, "type": "boolean" },
+            { "id": "2", "name": "linkedin_post_id",  "value": "={{$('Code — Coletar IDs Publicação').first().json.linkedin_post_id}}", "type": "string" },
+            { "id": "3", "name": "instagram_post_id", "value": "={{$('Code — Coletar IDs Publicação').first().json.instagram_post_id}}", "type": "string" },
+            { "id": "4", "name": "published_at",      "value": "={{$('Code — Coletar IDs Publicação').first().json.published_at}}", "type": "string" },
+            { "id": "5", "name": "linkedin_success",  "value": "={{$('Code — Coletar IDs Publicação').first().json.linkedin_success}}", "type": "boolean" },
+            { "id": "6", "name": "instagram_success", "value": "={{$('Code — Coletar IDs Publicação').first().json.instagram_success}}", "type": "boolean" }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger":             { "main": [[{ "node": "Code — Parse Input", "type": "main", "index": 0 }]] },
+    "Code — Parse Input":                  { "main": [[{ "node": "HTTP — LinkedIn Post", "type": "main", "index": 0 }, { "node": "HTTP — Instagram Criar Container", "type": "main", "index": 0 }]] },
+    "HTTP — Instagram Criar Container":    { "main": [[{ "node": "HTTP — Instagram Publicar", "type": "main", "index": 0 }]] },
+    "HTTP — LinkedIn Post":                { "main": [[{ "node": "Merge — Aguardar LinkedIn e Instagram", "type": "main", "index": 0 }]] },
+    "HTTP — Instagram Publicar":           { "main": [[{ "node": "Merge — Aguardar LinkedIn e Instagram", "type": "main", "index": 1 }]] },
+    "Merge — Aguardar LinkedIn e Instagram": { "main": [[{ "node": "Code — Coletar IDs Publicação", "type": "main", "index": 0 }]] },
+    "Code — Coletar IDs Publicação":       { "main": [[{ "node": "Google Sheets — Atualizar Status", "type": "main", "index": 0 }]] },
+    "Google Sheets — Atualizar Status":    { "main": [[{ "node": "Set — Resultado Final", "type": "main", "index": 0 }]] }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  }
+}
